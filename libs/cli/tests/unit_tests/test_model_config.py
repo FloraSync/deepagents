@@ -1096,6 +1096,18 @@ class TestGetAvailableModels:
             "Could not import profiles" in record.message for record in caplog.records
         )
 
+    def test_includes_codex_models(self):
+        """Codex models are always available for selector display."""
+        with patch(
+            "deepagents_cli.model_config._load_provider_profiles",
+            side_effect=ImportError("not installed"),
+        ):
+            models = get_available_models()
+
+        assert "codex" in models
+        assert "gpt-5.3-codex" in models["codex"]
+        assert "gpt-5.3-codex-spark" in models["codex"]
+
 
 class TestGetAvailableModelsMergesConfig:
     """Tests for get_available_models() merging config-file providers."""

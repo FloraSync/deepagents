@@ -491,7 +491,7 @@ def parse_args() -> argparse.Namespace:
         "-M",
         "--model",
         metavar="MODEL",
-        help="Model to use (e.g., claude-sonnet-4-6, gpt-5.2, codex:o4-mini). "
+        help="Model to use (e.g., claude-sonnet-4-6, gpt-5.2, codex:gpt-5.3-codex). "
         "Provider is auto-detected from model name. Codex requires `codex login` "
         "session auth (no API key env var).",
     )

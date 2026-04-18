@@ -1861,9 +1861,9 @@ def _get_default_model_spec(*, allow_codex_probe: bool = True) -> str:
         return "nvidia:nvidia/nemotron-3-super-120b-a12b"
     if allow_codex_probe:
         if has_codex_credentials() is True:
-            return "codex:o4-mini"
+            return "codex:gpt-5.3-codex"
     else:
-        return "codex:o4-mini"
+        return "codex:gpt-5.3-codex"
 
     msg = (
         "No credentials configured. You have no API key environment variables set "

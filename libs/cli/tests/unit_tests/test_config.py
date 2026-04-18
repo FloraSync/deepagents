@@ -202,6 +202,40 @@ class TestProjectAgentMdFinding:
         assert len(result) == 1
         assert result[0] == real_md
 
+    def test_resolves_project_local_agents_symlink(self, tmp_path: Path) -> None:
+        """Project-local AGENTS symlinks should resolve to concrete file paths."""
+        project_root = tmp_path / "project"
+        docs_dir = project_root / "docs"
+        docs_dir.mkdir(parents=True)
+        target = docs_dir / "workflow.md"
+        target.write_text("workflow")
+
+        agent_md = project_root / "AGENTS.md"
+        try:
+            agent_md.symlink_to(target)
+        except (NotImplementedError, OSError):
+            pytest.skip("Symlink creation is not supported in this environment")
+
+        result = _find_project_agent_md(project_root)
+        assert result == [target.resolve()]
+
+    def test_skips_agents_symlink_outside_project_root(self, tmp_path: Path) -> None:
+        """AGENTS symlinks to files outside the project root should be skipped."""
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+
+        outside = tmp_path / "outside.md"
+        outside.write_text("outside")
+
+        agent_md = project_root / "AGENTS.md"
+        try:
+            agent_md.symlink_to(outside)
+        except (NotImplementedError, OSError):
+            pytest.skip("Symlink creation is not supported in this environment")
+
+        result = _find_project_agent_md(project_root)
+        assert result == []
+
 
 class TestSettingsGetProjectAgentMdPath:
     """Test Settings.get_project_agent_md_path() integration."""
@@ -1933,9 +1967,155 @@ class TestCreateModelViaInitImportError:
         """Codex provider should use the local Codex chat-model wrapper."""
         from deepagents_cli.providers.codex import CodexChatModel
 
-        model = _create_model_via_init("o4-mini", "codex", {})
+        model = _create_model_via_init("gpt-5.3-codex", "codex", {})
         assert isinstance(model, CodexChatModel)
-        assert model.model == "o4-mini"
+        assert model.model == "gpt-5.3-codex"
+
+    def test_codex_chat_model_bind_tools_is_noop_passthrough(self) -> None:
+        """Codex wrapper should support tool binding during agent initialization."""
+        model = _create_model_via_init("gpt-5.3-codex", "codex", {})
+
+        bound = model.bind_tools([])
+
+        assert bound is model
+
+    def test_codex_generate_uses_responses_api_and_bound_tools(self) -> None:
+        """Codex provider should call Responses API with converted tool schemas."""
+        from langchain_core.messages import HumanMessage
+
+        model = _create_model_via_init("gpt-5.3-codex", "codex", {})
+        model.bind_tools(
+            [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "echo",
+                        "description": "Echo text",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "text": {"type": "string"},
+                            },
+                        },
+                    },
+                }
+            ]
+        )
+
+        response = {
+            "output": [
+                {
+                    "type": "message",
+                    "content": [{"type": "output_text", "text": "ok"}],
+                }
+            ],
+            "usage": {
+                "input_tokens": 1,
+                "output_tokens": 2,
+                "total_tokens": 3,
+            },
+        }
+
+        class _FakeStream:
+            def __init__(self, events: list[dict[str, object]]) -> None:
+                self._events = events
+
+            def __iter__(self):
+                return iter(self._events)
+
+            def close(self) -> None:
+                return None
+
+        mock_client = Mock()
+        mock_client.responses.create.return_value = _FakeStream(
+            [{"type": "response.completed", "response": response}]
+        )
+
+        with patch.object(model, "_create_client", return_value=mock_client):
+            result = model._generate([HumanMessage(content="hello")])
+
+        call_kwargs = mock_client.responses.create.call_args.kwargs
+        assert call_kwargs["model"] == "gpt-5.3-codex"
+        assert call_kwargs["input"] == [{"role": "user", "content": "hello"}]
+        assert call_kwargs["tools"] == [
+            {
+                "type": "function",
+                "name": "echo",
+                "description": "Echo text",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "text": {"type": "string"},
+                    },
+                },
+                "strict": False,
+            }
+        ]
+        assert call_kwargs["tool_choice"] == "auto"
+        assert call_kwargs["parallel_tool_calls"] is True
+        assert call_kwargs["stream"] is True
+        assert result.generations[0].message.content == "ok"
+
+    def test_codex_stream_backfills_output_item_events(self) -> None:
+        """Codex provider should backfill message output from stream item events."""
+        from langchain_core.messages import HumanMessage
+
+        model = _create_model_via_init("gpt-5.3-codex", "codex", {})
+
+        class _FakeStream:
+            def __init__(self, events: list[dict[str, object]]) -> None:
+                self._events = events
+
+            def __iter__(self):
+                return iter(self._events)
+
+            def close(self) -> None:
+                return None
+
+        done_item = {
+            "type": "message",
+            "content": [{"type": "output_text", "text": "backfilled"}],
+        }
+        terminal_response = {"output": []}
+        mock_client = Mock()
+        mock_client.responses.create.return_value = _FakeStream(
+            [
+                {"type": "response.output_item.done", "item": done_item},
+                {"type": "response.completed", "response": terminal_response},
+            ]
+        )
+
+        with patch.object(model, "_create_client", return_value=mock_client):
+            result = model._generate([HumanMessage(content="hello")])
+
+        assert result.generations[0].message.content == "backfilled"
+
+    def test_codex_reads_access_token_from_codex_home(self, tmp_path: Path) -> None:
+        """Codex provider should read OAuth token from `CODEX_HOME` auth file."""
+        codex_home = tmp_path / ".codex"
+        codex_home.mkdir()
+        (codex_home / "auth.json").write_text(
+            '{"tokens": {"access_token": "token-123", "refresh_token": "r"}}'
+        )
+
+        model = _create_model_via_init(
+            "gpt-5.3-codex",
+            "codex",
+            {"codex_home": str(codex_home)},
+        )
+
+        assert model._read_codex_access_token() == "token-123"  # noqa: SLF001
+
+    def test_codex_missing_auth_file_raises_targeted_error(self, tmp_path: Path) -> None:
+        """Codex provider should show login guidance when auth file is missing."""
+        model = _create_model_via_init(
+            "gpt-5.3-codex",
+            "codex",
+            {"codex_home": str(tmp_path / "missing")},
+        )
+
+        with pytest.raises(RuntimeError, match="Run `codex login`"):
+            model._read_codex_access_token()  # noqa: SLF001
 
 
 class TestDetectProvider:
@@ -1950,7 +2130,7 @@ class TestDetectProvider:
             ("o3-mini", "openai"),
             ("o4-mini", "openai"),
             ("codex", "codex"),
-            ("codex:o4-mini", "codex"),
+            ("codex:gpt-5.3-codex", "codex"),
             ("claude-sonnet-4-5", "anthropic"),
             ("claude-opus-4-5", "anthropic"),
             ("gemini-3.1-pro-preview", "google_genai"),
@@ -2033,7 +2213,7 @@ class TestDefaultModelSpec:
             patch.object(settings, "nvidia_api_key", None),
             patch("deepagents_cli.model_config.has_codex_credentials", return_value=True),
         ):
-            assert _get_default_model_spec() == "codex:o4-mini"
+            assert _get_default_model_spec() == "codex:gpt-5.3-codex"
 
     def test_error_mentions_codex_login_when_no_credentials(self) -> None:
         """Missing credentials error should mention `codex login`."""

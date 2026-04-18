@@ -79,7 +79,7 @@ def show_help() -> None:
     )
     console.print("  -a, --agent NAME           Agent to use (e.g., coder, researcher)")
     console.print(
-        "  -M, --model MODEL          Model to use (e.g., gpt-4o, codex:o4-mini)"
+        "  -M, --model MODEL          Model to use (e.g., gpt-4o, codex:gpt-5.3-codex)"
     )
     console.print(
         "                             Codex uses `codex login` session auth"

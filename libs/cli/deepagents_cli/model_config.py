@@ -553,6 +553,14 @@ def get_available_models() -> dict[str, list[str]]:
                     available[provider_name].append(model)
 
     _available_models_cache = available
+    codex_models = [
+        "gpt-5.4",
+        "gpt-5.4-mini",
+        "gpt-5.3-codex",
+        "gpt-5.3-codex-spark",
+        "gpt-5.2-codex",
+    ]
+    available[CODEX_PROVIDER_NAME] = codex_models
     return available
 
 

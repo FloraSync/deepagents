@@ -179,10 +179,40 @@ def find_project_agent_md(project_root: Path) -> list[Path]:
         project_root / "AGENTS.md",
     ]
     paths: list[Path] = []
+    seen: set[Path] = set()
+    try:
+        resolved_project_root = project_root.resolve()
+    except OSError:
+        resolved_project_root = project_root
     for candidate in candidates:
         try:
-            if candidate.exists():
+            if not candidate.exists():
+                continue
+
+            if candidate.is_symlink():
+                resolved_candidate = candidate.resolve()
+                if not resolved_candidate.is_relative_to(resolved_project_root):
+                    logger.warning(
+                        "Skipping AGENTS.md symlink outside project root: %s -> %s",
+                        candidate,
+                        resolved_candidate,
+                    )
+                    continue
+                if not resolved_candidate.is_file():
+                    logger.warning(
+                        "Skipping AGENTS.md symlink to non-file target: %s -> %s",
+                        candidate,
+                        resolved_candidate,
+                    )
+                    continue
+                if resolved_candidate not in seen:
+                    paths.append(resolved_candidate)
+                    seen.add(resolved_candidate)
+                continue
+
+            if candidate not in seen:
                 paths.append(candidate)
+                seen.add(candidate)
         except OSError:
             pass
     return paths

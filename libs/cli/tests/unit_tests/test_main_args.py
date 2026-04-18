@@ -343,7 +343,7 @@ class TestModelArgumentHelp:
             parse_args()
 
         help_text = stdout_buf.getvalue()
-        assert "codex:o4-mini" in help_text
+        assert "codex:gpt-5.3-codex" in help_text
         assert "codex login" in help_text
 
 

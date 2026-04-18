@@ -203,7 +203,7 @@ class TestModelSwitchErrorHandling:
             ),
             patch.object(ErrorMessage, "__init__", capture_init),
         ):
-            await app._switch_model("codex:o4-mini")
+            await app._switch_model("codex:gpt-5.3-codex")
 
         app._mount_message.assert_called_once()  # type: ignore[union-attr]
         assert len(captured_errors) == 1
